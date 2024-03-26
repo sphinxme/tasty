@@ -4,92 +4,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hello World!</title>
+    <title>PoC</title>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"
         integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO"
         crossorigin="anonymous"></script>
-    <script>
-        var singalServer = "http://localhost:3000";
-        var stunServer = "stun:stun.l.google.com:19302";
-        var videoUrl = "https://media.w3.org/2010/05/sintel/trailer.mp4";
-        var pc = new RTCPeerConnection({
-            iceServers: [{ urls: stunServer }],
-        });
-        var socket;
 
-        async function createRoom() {
-            return new Promise((resolve, reject) => {
-                socket.emit("createRoom", videoUrl, (error) => {
-                    if (error) {
-                        reject(error);
-                    }
-                    resolve();
-                })
-            })
-        }
-
-        async function sendOffer(sdp) {
-            return new Promise((resolve, reject) => {
-                socket.emit("sendOffer", sdp, (rawAnswer, error) => {
-                    if (error) {
-                        reject(error);
-                    }
-                    resolve(rawAnswer);
-                });
-            })
-        }
-
-        async function initRoom() {
-            socket = io(singalServer);
-
-            await pc.addTransceiver('audio', { direction: 'recvonly' });
-            await pc.addTransceiver('video', { direction: 'recvonly' })
-
-            pc.onicecandidate = (event) => {
-                console.log({ t: "onicecandidate", event })
-                if (event.candidate) {
-                    socket.emit("pushICECandidate", event.candidate)
-                }
-            }
-            socket.on("addICECandidate", (candidate) => {
-                console.log("adding ice candidate from signal-kurento")
-                pc.addIceCandidate(candidate);
-            })
-            pc.ontrack = (event) => {
-                let screen = document.getElementById("screen")
-                screen.srcObject = event.streams[0];
-            }
-            await createRoom();
-        }
-
-        async function establishRTC(callback) {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            const rawAnswer = await sendOffer(pc.localDescription.sdp);
-            let answer = new RTCSessionDescription({
-                type: 'answer',
-                sdp: rawAnswer
-            })
-            await pc.setRemoteDescription(answer);
-            console.log("setRemoteDescription done", answer, offer)
-        }
-
-        async function startPlay() {
-            await initRoom();
-            await establishRTC();
-            socket.emit("play");
-            console.log("emitted play");
-        }
-    </script>
     <style>
         :root {
             font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
             line-height: 1.5;
             font-weight: 400;
+            color: #213547;
+            background-color: #ffffff;
 
-            color-scheme: light dark;
-            color: rgba(255, 255, 255, 0.87);
-            background-color: #242424;
 
             font-synthesis: none;
             text-rendering: optimizeLegibility;
@@ -112,7 +39,10 @@
         }
 
         .card {
-            padding: 2em;
+            padding: 1em;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 1);
+            box-shadow: 0px 2px 50px rgba(0, 0, 0, 0.25);
         }
 
         #app {
@@ -129,7 +59,7 @@
             font-size: 1em;
             font-weight: 500;
             font-family: inherit;
-            background-color: #1a1a1a;
+            background-color: #f9f9f9;
             cursor: pointer;
             transition: border-color 0.25s;
         }
@@ -143,31 +73,190 @@
             outline: 4px auto -webkit-focus-ring-color;
         }
 
-        @media (prefers-color-scheme: light) {
-            :root {
-                color: #213547;
-                background-color: #ffffff;
-            }
+        input {
+            border-radius: 8px;
+            border: 1px solid gray;
+            padding: 0.6em 1.2em;
+        }
 
-            button {
-                background-color: #f9f9f9;
-            }
+        .row {
+            justify-content: space-around;
+            display: flex;
         }
     </style>
 </head>
 
 <body>
     <div id="app">
-        <h1>Movie</h1>
+        <h1>Movie Room</h1>
 
         <div class="card">
-            <video id="screen" autoplay controls></video>
+            <video id="screen" autoplay controls style="min-width: 320px;min-height: 240px;"></video>
         </div>
 
-        <div class="card">
-            <button onclick="startPlay();">Start Play</button>
+        <div style="height: 2em;"></div>
+
+        <div class="row">
+            <button onclick="room.play()">播放</button>
+            <button onclick="room.pause()">暂停</button>
+            <input type="number" id="position" placeholder="请输入进度(ms)" />
+            <button onclick="room.setPosition(getPosition());">调整进度</button>
         </div>
-    </div>
+        <div style="height: 2em;"></div>
+
+        <div class="row">
+            <button onclick="room.joinRoom();">进入房间</button>
+            <button onclick="room.closeRoom();">关闭房间</button>
+        </div>
+
+        <div style="height: 2em;"></div>
+
+        <div class="row">
+            <input id="videoURL" style="flex-grow: 1;" placeholder="请输入videoURL" />
+            <button style="margin-left: 1rem;" onclick="room.createRoom(getVideoURL());">创建房间</button>
+        </div>
+        <div>媒体信息: <span id="media-info">123</span></div>
+        <div class="row">
+            <button onclick="main();">init</button>
+        </div>
+
+        <script>
+            var singalServer = "http://192.168.1.5:3000";
+            var stunServer = "stun:stun.l.google.com:19302";
+            var videoUrl = "https://media.w3.org/2010/05/sintel/trailer.mp4";
+            const videoURLInput = document.getElementById('videoURL');
+            const getVideoURL = () => {
+                return videoURLInput.value
+            }
+            const mediaInfoDOM = document.getElementById('media-info');
+            const positionDOM = document.getElementById('position');
+            const getPosition = () => {
+                return Number(positionDOM.value)
+            }
+
+            var room;
+            var pc;
+
+            async function makePeerConnection(stunServer) {
+                const pc = new RTCPeerConnection({
+                    iceServers: [{ urls: stunServer }],
+                });
+                await pc.addTransceiver('audio', { direction: 'recvonly' });
+                await pc.addTransceiver('video', { direction: 'recvonly' });
+                pc.ontrack = (event) => {
+                    let screen = document.getElementById("screen")
+                    screen.srcObject = event.streams[0];
+                }
+                return pc
+            }
+
+            async function Room(stunServer, singalServer) {
+                var pc;
+                const socket = io(singalServer);
+
+                socket.on("roomUpdated", (event) => {
+                    // 更新界面中房间的信息
+                    // TODO:抽出去
+                    if (event) {
+                        let { videoURL, videoInfo } = event
+                        videoURLInput.value = videoURL ? videoURL : "";
+                        mediaInfoDOM.textContent = JSON.stringify(videoInfo)
+                    } else {
+                        videoURLInput.value = "";
+                        mediaInfoDOM.textContent = "无"
+                    }
+                })
+
+                const takeSeat = async () => {
+                    return new Promise((resolve, reject) => {
+                        socket.emit("takeSeat", (error) => {
+                            if (error) {
+                                reject(error);
+                            }
+                            resolve();
+                        });
+                    })
+                }
+
+                const sendOffer = async (sdp) => {
+                    return new Promise((resolve, reject) => {
+                        socket.emit("sendOffer", sdp, (rawAnswer, error) => {
+                            if (error) {
+                                reject(error);
+                            }
+                            resolve(rawAnswer);
+                        });
+                    })
+                }
+
+                return {
+                    // 房间控制
+                    createRoom: async (videoURL) => {
+                        return new Promise((resolve, reject) => {
+                            socket.emit("createRoom", videoUrl, (error) => {
+                                if (error) {
+                                    reject(error);
+                                }
+                                resolve();
+                            })
+                        })
+                    },
+                    joinRoom: async () => {
+                        pc = await makePeerConnection(stunServer);
+                        await takeSeat(); // 让kms侧把对端的WebRtcPeerConnection准备好
+
+                        pc.onicecandidate = (event) => {
+                            console.log({ t: "onicecandidate", event })
+                            if (event.candidate) {
+                                socket.emit("pushICECandidate", event.candidate)
+                            }
+                        }
+                        socket.on("addICECandidate", (candidate) => {
+                            console.log("adding ice candidate from signal-kurento")
+                            pc.addIceCandidate(candidate);
+                        })
+
+                        const offer = await pc.createOffer();
+                        await pc.setLocalDescription(offer);
+                        const rawAnswer = await sendOffer(pc.localDescription.sdp);
+
+                        let answer = new RTCSessionDescription({
+                            type: 'answer',
+                            sdp: rawAnswer
+                        })
+                        await pc.setRemoteDescription(answer);
+
+                        socket.on("RoomClosed", () => {
+                            let screen = document.getElementById("screen")
+                            screen.srcObject = null;
+                        })
+
+                        console.log("setRemoteDescription done", answer, offer)
+                    },
+                    closeRoom: () => {
+                        socket.emit("closeRoom");
+                    },
+
+                    // 媒体控制
+                    play: () => {
+                        socket.emit("play");
+                    },
+                    pause: () => {
+                        socket.emit("pause");
+                    },
+                    setPosition: (position) => {
+                        socket.emit("doSeek", position)
+                    },
+                }
+            }
+
+            async function main() {
+                room = await Room(stunServer, singalServer);
+
+                console.log("tasty inited");
+            }
+            // main();
+        </script>
 </body>
 
 </html>
